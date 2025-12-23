@@ -1,97 +1,285 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# ChatApp - React Native Messaging Application
 
-# Getting Started
+A modern, real-time messaging application built with React Native, featuring direct messaging, group chats, and WhatsApp-style functionality.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## 📱 Features
 
-## Step 1: Start Metro
+### Authentication
+- User registration and login
+- Email/password authentication
+- Secure password reset functionality
+- Persistent authentication with keychain storage
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+### Direct Messaging
+- One-on-one chat conversations
+- Real-time message delivery
+- Message read receipts
+- Typing indicators
+- Message timestamps
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+### Group Chat
+- Create and manage group chats
+- Add/remove group members
+- Group roles (Owner, Admin, Member)
+- Group info screen with member management
+- System messages for group events (e.g., "X added Y", "X is now admin")
 
-```sh
-# Using npm
-npm start
+### Messaging Features
+- **Reply to Messages**: Quote and reply to specific messages
+- **Forward Messages**: Forward messages to other chats
+- **Delete Messages**: 
+  - Delete for me (hide message from your view)
+  - Delete for everyone (remove message for all participants)
+- **System Messages**: WhatsApp-style notifications for group events
+- **Message Bubbles**: 
+  - Different styles for sent/received messages
+  - Sender name and avatar display in group chats
+  - Timestamp display
 
-# OR using Yarn
-yarn start
+### User Interface
+- Modern, clean UI design
+- Responsive layout with proper scaling
+- Bottom navigation bar
+- Profile screens for users and groups
+- Contact management
+- Call history screen
+
+### Real-time Features
+- Real-time message synchronization
+- Live typing indicators
+- Online/offline status
+- Last seen timestamps
+
+## 🛠 Tech Stack
+
+- **Framework**: React Native 0.83.1
+- **Language**: TypeScript 5.8.3
+- **State Management**: Redux Toolkit
+- **Navigation**: React Navigation 6.x
+- **Backend**: Firebase
+  - Firebase Authentication
+  - Firebase Realtime Database
+  - Firebase Storage
+- **Real-time Communication**: Socket.IO
+- **UI Components**: React Native Vector Icons
+- **Storage**: AsyncStorage, React Native Keychain
+
+## 📁 Project Structure
+
+```
+react-native-chatapp/
+├── android/                 # Android native code
+├── ios/                     # iOS native code
+├── src/
+│   ├── Components/         # Reusable components
+│   │   └── Common/
+│   │       ├── Avatar.tsx
+│   │       ├── BottomNavBar.tsx
+│   │       ├── MessageBubble.tsx
+│   │       ├── SystemMessage.tsx
+│   │       └── CustomTextInput.tsx
+│   ├── screens/            # Screen components
+│   │   ├── auth/          # Authentication screens
+│   │   ├── chats/         # Chat-related screens
+│   │   ├── calls/         # Call history screen
+│   │   ├── contacts/      # Contacts screen
+│   │   └── settings/      # Settings/profile screen
+│   ├── services/          # Business logic services
+│   │   ├── firebase/     # Firebase services
+│   │   └── socket/       # Socket.IO services
+│   ├── Redux/            # Redux store and slices
+│   ├── navigation/       # Navigation configuration
+│   ├── types/            # TypeScript type definitions
+│   ├── Helper/           # Utility functions
+│   └── firebase/         # Firebase configuration
+└── package.json
 ```
 
-## Step 2: Build and run your app
+## 🚀 Getting Started
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+### Prerequisites
 
-### Android
+- Node.js >= 20
+- React Native development environment set up
+- Android Studio (for Android development)
+- Xcode (for iOS development, macOS only)
+- Firebase project configured
 
-```sh
-# Using npm
-npm run android
+### Installation
 
-# OR using Yarn
-yarn android
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd react-native-chatapp
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   # or
+   yarn install
+   ```
+
+3. **iOS Setup** (macOS only)
+   ```bash
+   cd ios
+   pod install
+   cd ..
+   ```
+
+4. **Firebase Configuration**
+   - Create a Firebase project at [Firebase Console](https://console.firebase.google.com/)
+   - Download `google-services.json` for Android and place it in `android/app/`
+   - Download `GoogleService-Info.plist` for iOS and place it in `ios/`
+   - Configure Firebase Authentication (Email/Password)
+   - Set up Firebase Realtime Database
+   - Configure Firebase Storage
+
+5. **Environment Setup**
+   - Update Firebase configuration in `src/firebase/` directory
+   - Configure Socket.IO server URL in `src/services/socket/socket.client.ts`
+
+### Running the App
+
+1. **Start Metro Bundler**
+   ```bash
+   npm start
+   # or
+   yarn start
+   ```
+
+2. **Run on Android**
+   ```bash
+   npm run android
+   # or
+   yarn android
+   ```
+
+3. **Run on iOS**
+   ```bash
+   npm run ios
+   # or
+   yarn ios
+   ```
+
+## 🔧 Configuration
+
+### Firebase Setup
+
+1. Create a Firebase project
+2. Enable Authentication (Email/Password)
+3. Create a Realtime Database
+4. Set up Storage bucket
+5. Add your app to Firebase project
+6. Download configuration files
+
+### Socket.IO Server
+
+Update the Socket.IO server URL in `src/services/socket/socket.client.ts`:
+```typescript
+socket = io('YOUR_SOCKET_SERVER_URL', {
+  // configuration
+});
 ```
 
-### iOS
+## 📱 Screens Overview
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+### Authentication Screens
+- **SplashScreen**: Initial loading screen with authentication check
+- **LoginScreen**: User login interface
+- **RegisterScreen**: New user registration
+- **ForgotPasswordScreen**: Password reset functionality
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+### Chat Screens
+- **ChatListScreen**: List of all conversations
+- **ChatScreen**: Individual chat interface with messaging
+- **GroupCreateScreen**: Create new group chat
+- **GroupInfoScreen**: View group information and members
+- **AddMembersScreen**: Add members to group chat
 
-```sh
-bundle install
-```
+### Other Screens
+- **CallsScreen**: Call history
+- **ContactsScreen**: User contacts list
+- **SettingsScreen**: User profile and app settings
 
-Then, and every time you update your native dependencies, run:
+## 🎨 Key Features Implementation
 
-```sh
-bundle exec pod install
-```
+### Message System
+- Real-time message synchronization using Firebase Realtime Database
+- Message types: text, image, file, system
+- Message status: sent, delivered, read
+- Reply and forward functionality
+- Delete for me / Delete for everyone
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+### Group Management
+- Create groups with name and description
+- Role-based permissions (Owner, Admin, Member)
+- Add/remove members
+- System notifications for group events
 
-```sh
-# Using npm
-npm run ios
+### User Interface
+- WhatsApp-inspired design
+- Responsive components with proper scaling
+- Smooth animations and transitions
+- Keyboard-aware layouts
 
-# OR using Yarn
-yarn ios
-```
+## 🔐 Security
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+- Secure authentication with Firebase
+- Password storage using React Native Keychain
+- API keys stored securely (not in version control)
+- `google-services.json` excluded from Git (see `.gitignore`)
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+## 📝 Scripts
 
-## Step 3: Modify your app
+- `npm start` - Start Metro bundler
+- `npm run android` - Run on Android
+- `npm run ios` - Run on iOS
+- `npm run lint` - Run ESLint
+- `npm test` - Run tests
 
-Now that you have successfully run the app, let's make changes!
+## 🤝 Contributing
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+## 📄 License
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+This project is private and proprietary.
 
-## Congratulations! :tada:
+## 👨‍💻 Development
 
-You've successfully run and modified your React Native App. :partying_face:
+### Code Structure
+- TypeScript for type safety
+- Redux for state management
+- Service layer for business logic
+- Component-based architecture
 
-### Now what?
+### Best Practices
+- Follow React Native best practices
+- Use TypeScript types
+- Maintain component reusability
+- Keep services modular
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+## 🐛 Troubleshooting
 
-# Troubleshooting
+### Common Issues
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+1. **Metro bundler issues**: Clear cache with `npm start -- --reset-cache`
+2. **Android build errors**: Clean build with `cd android && ./gradlew clean`
+3. **iOS pod issues**: Run `cd ios && pod install`
+4. **Firebase connection**: Verify configuration files are correctly placed
 
-# Learn More
+## 📚 Resources
 
-To learn more about React Native, take a look at the following resources:
+- [React Native Documentation](https://reactnative.dev/docs/getting-started)
+- [Firebase Documentation](https://firebase.google.com/docs)
+- [React Navigation](https://reactnavigation.org/)
+- [Redux Toolkit](https://redux-toolkit.js.org/)
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+---
+
+Built with ❤️ using React Native
