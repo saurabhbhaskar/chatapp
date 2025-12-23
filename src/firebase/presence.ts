@@ -3,18 +3,18 @@ import {getCurrentUser} from './auth';
 
 const db = database();
 
+/**
+ * Set user online status
+ * According to schema: presence/uid/online (boolean) and lastSeen (timestamp)
+ */
 export const setUserOnline = async (uid: string): Promise<void> => {
-  const userStatusRef = db.ref(`presence/${uid}`);
-  const isOnlineRef = db.ref(`users/${uid}/status`);
+  const presenceRef = db.ref(`presence/${uid}`);
 
   try {
-    const setOnlinePromise = Promise.all([
-      isOnlineRef.set('online'),
-      userStatusRef.set({
-        status: 'online',
-        lastSeen: Date.now(),
-      }),
-    ]);
+    const setOnlinePromise = presenceRef.set({
+      online: true,
+      lastSeen: Date.now(),
+    });
     
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('setUserOnline timeout after 3 seconds')), 3000);
@@ -22,25 +22,29 @@ export const setUserOnline = async (uid: string): Promise<void> => {
     
     await Promise.race([setOnlinePromise, timeoutPromise]);
 
+    // Set up disconnect handler to mark offline when connection is lost
     try {
-      userStatusRef.onDisconnect().set({
-        status: 'offline',
+      presenceRef.onDisconnect().set({
+        online: false,
         lastSeen: Date.now(),
       });
     } catch (disconnectError) {
+      // Ignore disconnect setup errors
     }
   } catch (error) {
     throw error;
   }
 };
 
+/**
+ * Set user offline status
+ * According to schema: presence/uid/online (boolean) and lastSeen (timestamp)
+ */
 export const setUserOffline = async (uid: string): Promise<void> => {
-  const userStatusRef = db.ref(`presence/${uid}`);
-  const isOnlineRef = db.ref(`users/${uid}/status`);
+  const presenceRef = db.ref(`presence/${uid}`);
 
-  await isOnlineRef.set('offline');
-  await userStatusRef.set({
-    status: 'offline',
+  await presenceRef.set({
+    online: false,
     lastSeen: Date.now(),
   });
 };
@@ -49,18 +53,39 @@ export const getUserPresenceRef = (uid: string) => {
   return db.ref(`presence/${uid}`);
 };
 
-export const getUserPresence = async (uid: string): Promise<any> => {
+/**
+ * Get user presence (one-time fetch)
+ * Returns: { online: boolean, lastSeen: number } | null
+ */
+export const getUserPresence = async (uid: string): Promise<{online: boolean; lastSeen: number} | null> => {
   const snapshot = await getUserPresenceRef(uid).once('value');
-  return snapshot.val();
+  const data = snapshot.val();
+  if (!data) return null;
+  return {
+    online: data.online === true,
+    lastSeen: data.lastSeen || 0,
+  };
 };
 
+/**
+ * Watch user presence for real-time updates
+ * Returns unsubscribe function
+ */
 export const watchUserPresence = (
   uid: string,
-  callback: (presence: any) => void,
+  callback: (presence: {online: boolean; lastSeen: number} | null) => void,
 ): () => void => {
   const ref = getUserPresenceRef(uid);
   const listener = ref.on('value', snapshot => {
-    callback(snapshot.val());
+    const data = snapshot.val();
+    if (!data) {
+      callback(null);
+      return;
+    }
+    callback({
+      online: data.online === true,
+      lastSeen: data.lastSeen || 0,
+    });
   });
 
   return () => ref.off('value', listener);

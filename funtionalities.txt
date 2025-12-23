@@ -1,0 +1,492 @@
+Perfect. This is the **final feature blueprint** of your app.
+Think of this as the document you’d hand to yourself before writing a single line of code.
+
+I’ll organize it like WhatsApp does internally, not random features.
+Each section answers three things:
+
+* **What the functionality is**
+* **What the user experiences**
+* **What your app must do internally**
+
+This will guide **UI, services, Firebase writes, and Socket.IO events**.
+
+---
+
+# 🔥 FINAL FUNCTIONALITY LIST
+
+(WhatsApp-style Messaging App)
+
+---
+
+## 1️⃣ AUTHENTICATION & ACCOUNT MANAGEMENT
+
+### 1.1 Register (Sign Up)
+
+**User experience**
+
+* User enters:
+
+  * Name
+  * Username (unique)
+  * Phone number (unique)
+  * Email
+  * Password
+  * Confirm password
+* Account is created
+* User is logged in automatically
+
+**System behavior**
+
+* Create Firebase Auth user
+* Save profile in `/users`
+* Save username mapping in `/usernames`
+* Save phone mapping in `/phones`
+* Initialize presence as offline
+* Initialize empty chat list
+
+---
+
+### 1.2 Login
+
+**User experience**
+
+* Login using:
+
+  * Username + password OR
+  * Phone number + password OR
+  * Email + password
+
+**System behavior**
+
+* Resolve username/phone → uid
+* Fetch email
+* Firebase Auth login
+* Restore session automatically on app restart
+* Connect Socket.IO
+* Set presence to online
+
+---
+
+### 1.3 Logout
+
+**User experience**
+
+* User taps logout
+* App returns to login screen
+
+**System behavior**
+
+* Firebase Auth signOut
+* Disconnect socket
+* Set presence offline
+* Clear local state
+
+---
+
+### 1.4 Forgot Password
+
+**User experience**
+
+* Enter email
+* Receive reset link
+
+**System behavior**
+
+* Firebase sends password reset email
+* No database write needed
+
+---
+
+## 2️⃣ USER PROFILE & PRESENCE
+
+### 2.1 Profile View & Edit
+
+**User experience**
+
+* View own profile
+* Edit name, avatar, about
+
+**System behavior**
+
+* Update `/users/uid`
+* Reflect changes across chats automatically
+
+---
+
+### 2.2 Online / Offline / Last Seen
+
+**User experience**
+
+* See who is online
+* See last seen time
+
+**System behavior**
+
+* On socket connect → `/presence/uid/online = true`
+* On disconnect → `/presence/uid/online = false`
+* Update lastSeen timestamp
+
+---
+
+## 3️⃣ SEARCH & DISCOVERY
+
+### 3.1 Search User by Username
+
+**User experience**
+
+* Type username
+* See matching user
+
+**System behavior**
+
+* Query `/usernames`
+* Fetch user profile from `/users`
+
+---
+
+### 3.2 Search User by Phone
+
+**User experience**
+
+* Enter phone number
+* Find user if registered
+
+**System behavior**
+
+* Query `/phones`
+* Fetch user profile
+
+---
+
+### 3.3 Search Chats
+
+**User experience**
+
+* Search chats by name or participant
+
+**System behavior**
+
+* Filter `/userChats/uid`
+* Match chat name or group name
+
+---
+
+## 4️⃣ PRIVATE CHAT (1–to–1)
+
+### 4.1 Start Private Chat
+
+**User experience**
+
+* Tap on a user
+* Chat screen opens
+
+**System behavior**
+
+* Check if private chat exists
+* If not:
+
+  * Create chat in `/chats`
+  * Add both users as members
+  * Add chat entry in `/userChats` for both users
+
+---
+
+### 4.2 Send Message
+
+**User experience**
+
+* Message appears instantly
+* Sent tick appears
+
+**System behavior**
+
+* Write message to `/messages/chatId`
+* Update `/userChats` lastMessage & timestamp
+* Emit socket event
+* Initialize message status as sent
+
+---
+
+### 4.3 Receive Message
+
+**User experience**
+
+* Message appears instantly
+* Notification if chat not open
+
+**System behavior**
+
+* Socket receives message
+* Firebase listener syncs message
+* Update unread count
+* Update messageStatus to delivered
+
+---
+
+### 4.4 Read Receipt
+
+**User experience**
+
+* See read ticks
+
+**System behavior**
+
+* When chat opened:
+
+  * Update `/messageStatus/chatId/messageId/uid = read`
+  * Reset unread count
+
+---
+
+## 5️⃣ GROUP CHAT (WhatsApp-STYLE)
+
+### 5.1 Create Group
+
+**User experience**
+
+* Select users
+* Enter group name, description
+* Group created
+
+**System behavior**
+
+* Create chat in `/chats` with:
+
+  * creator as owner
+  * selected users as members
+* Create `/userChats` entries
+* Add system message “Group created”
+
+---
+
+### 5.2 Group Roles
+
+**Roles**
+
+* Owner
+* Admin
+* Member
+
+**Capabilities**
+
+* Owner:
+
+  * Add/remove admins
+  * Delete group
+* Admin:
+
+  * Add/remove members
+* Member:
+
+  * Send messages
+  * Leave group
+
+---
+
+### 5.3 Add Members
+
+**User experience**
+
+* Admin adds users
+
+**System behavior**
+
+* Validate role
+* Add user to `/chats/chatId/members`
+* Add `/userChats` entry
+* Add system message “X added Y”
+
+---
+
+### 5.4 Remove Members
+
+**User experience**
+
+* Admin removes user
+
+**System behavior**
+
+* Remove from members
+* Remove `/userChats`
+* Add system message
+
+---
+
+### 5.5 Leave Group
+
+**User experience**
+
+* User leaves group
+
+**System behavior**
+
+* Remove user from members
+* Remove `/userChats`
+* Add system message
+* If owner leaves:
+
+  * Promote admin
+
+---
+
+## 6️⃣ MESSAGING FEATURES
+
+### 6.1 Typing Indicator
+
+**User experience**
+
+* “User is typing…”
+
+**System behavior**
+
+* Emit socket typing event
+* Write temporary data in `/typing`
+* Auto-clear after timeout
+
+---
+
+### 6.2 Reply to Message
+
+**User experience**
+
+* Swipe to reply
+* Show quoted message
+
+**System behavior**
+
+* Save `replyTo` messageId in message node
+
+---
+
+### 6.3 Delete Message
+
+**Delete for me**
+
+* Add uid to `deletedFor`
+
+**Delete for everyone**
+
+* Mark message as deleted
+* Replace content with “Message deleted”
+
+---
+
+### 6.4 Forward Message
+
+**User experience**
+
+* Select message
+* Choose chat
+* Message forwarded
+
+**System behavior**
+
+* Create new message with reference metadata
+
+---
+
+## 7️⃣ CHAT LIST (MOST IMPORTANT SCREEN)
+
+### 7.1 Chat List Display
+
+**User experience**
+
+* See users & groups together
+* Ordered by recent activity
+* Show last message preview
+* Show unread count
+
+**System behavior**
+
+* Read `/userChats/uid`
+* Order by `lastMessageAt`
+* Merge presence data
+
+---
+
+### 7.2 Pin & Mute
+
+**User experience**
+
+* Pin important chats
+* Mute noisy chats
+
+**System behavior**
+
+* Update flags in `/userChats`
+
+---
+
+## 8️⃣ NOTIFICATIONS (READY FOR FCM)
+
+### 8.1 Background Notification
+
+**User experience**
+
+* Get notified of new messages
+
+**System behavior**
+
+* Increment unread count
+* (Later) trigger FCM push
+
+---
+
+## 9️⃣ PRIVACY & SAFETY
+
+### 9.1 Block User
+
+**User experience**
+
+* Block someone
+* No messages from them
+
+**System behavior**
+
+* Write to `/blocks`
+* Prevent message send/receive
+
+---
+
+## 1️⃣0️⃣ SYSTEM & EDGE CASES
+
+### 10.1 App Restart
+
+* Firebase restores auth
+* Messages reloaded
+* Socket reconnects
+* Presence updated
+
+---
+
+### 10.2 Offline Handling
+
+* Messages queued locally
+* Sent when connection resumes
+* Firebase syncs automatically
+
+---
+
+## ✅ FINAL SUMMARY
+
+With these functionalities, your app supports:
+
+* WhatsApp-style private & group chat
+* Admin-controlled groups
+* Reliable message delivery
+* Presence & read receipts
+* Scalable chat list
+* Firebase-free-tier friendly design
+
+This is **not a demo-level spec**.
+This is a **production-quality MVP**.
+
+---
+
+### What I recommend next (pick one)
+
+1. 🔐 Firebase **security rules** for all features
+2. 🧩 Service-layer **code structure** (Auth, Chat, Group, Message)
+3. 🔄 Exact **data flow diagrams** for message send/receive
+
+Tell me where you want to go next and we’ll lock it in step by step 🚀

@@ -5,6 +5,10 @@ export interface User {
   phoneNumber?: string;
   displayName?: string;
   photoURL?: string;
+  avatar?: string;
+  about?: string;
+  name?: string;
+  phone?: string;
   status?: 'online' | 'offline' | 'away';
   lastSeen?: number;
   createdAt: number;
@@ -13,7 +17,7 @@ export interface User {
 
 export interface UserPresence {
   uid: string;
-  status: 'online' | 'offline' | 'away';
+  online: boolean;
   lastSeen: number;
 }
 

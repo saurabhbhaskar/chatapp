@@ -144,7 +144,6 @@ const ContactsScreen: React.FC = () => {
         }
       />
 
-      {/* Bottom Navigation Bar */}
       <BottomNavBar activeTab="contacts" onTabPress={handleTabPress} />
     </View>
   );

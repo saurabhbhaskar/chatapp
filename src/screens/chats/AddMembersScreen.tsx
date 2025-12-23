@@ -1,4 +1,4 @@
-import React, {useState, useCallback, useRef, useEffect} from 'react';
+import React, {useState, useEffect} from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,11 @@ import {
   StatusBar,
   TextInput,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import {useNavigation, useRoute} from '@react-navigation/native';
-import {useSelector} from 'react-redux';
+import {useSelector, useDispatch} from 'react-redux';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import Icon from 'react-native-vector-icons/Ionicons';
 import {
   horizontalScale,
   moderateScale,
@@ -20,305 +20,283 @@ import {
 } from '../../Components/Common/View/ResponsiveDesign';
 import {colors} from '../../Helper/colors';
 import {fonts} from '../../Helper/fontsUtils';
-import {StringUtils} from '../../Helper/StringUtils';
-import {UserService, GroupService, ChatService} from '../../services';
+import {ChatService, GroupService} from '../../services';
 import {User} from '../../types';
-import strings from '../../Constants/strings';
+import Avatar from '../../Components/Common/Avatar';
+import {getDatabase} from '../../firebase/database';
+import {addSnackbar, SnackbarType} from '../../Redux/snackbarSlice';
 
 const AddMembersScreen: React.FC = () => {
   const navigation = useNavigation();
   const route = useRoute();
+  const dispatch = useDispatch();
   const {chatId} = route.params as {chatId: string};
   const {user} = useSelector((state: any) => state.auth);
   const insets = useSafeAreaInsets();
+  
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
+  const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<User[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchError, setSearchError] = useState('');
-  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
   const [addingMembers, setAddingMembers] = useState(false);
-  const [currentChat, setCurrentChat] = useState<any>(null);
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [existingMemberIds, setExistingMemberIds] = useState<Set<string>>(new Set());
 
-  // Load current chat to get existing members
   useEffect(() => {
     const loadChat = async () => {
       try {
         const chat = await ChatService.getChat(chatId);
-        setCurrentChat(chat);
+        if (chat?.participants) {
+          const participantIds = Array.isArray(chat.participants)
+            ? chat.participants
+            : Object.keys(chat.participants || {});
+          setExistingMemberIds(new Set(participantIds));
+        }
       } catch (error) {
+        console.error('Error loading chat:', error);
       }
     };
     loadChat();
   }, [chatId]);
 
   useEffect(() => {
-    return () => {
-      if (searchTimeoutRef.current) {
-        clearTimeout(searchTimeoutRef.current);
+    if (!user) return;
+
+    const loadAllUsers = async () => {
+      try {
+        setLoading(true);
+        const db = getDatabase();
+        const snapshot = await db.ref('users').once('value');
+        const usersData = snapshot.val();
+        
+        if (usersData) {
+          const usersList: User[] = [];
+          for (const userId in usersData) {
+            const userData = usersData[userId];
+            if (userData && userData.uid) {
+              if (userData.uid !== user.uid && !existingMemberIds.has(userData.uid)) {
+                usersList.push(userData);
+              }
+            }
+          }
+          setAllUsers(usersList);
+          setFilteredUsers(usersList);
+        }
+      } catch (error) {
+        console.error('Error loading users:', error);
+        dispatch(
+          addSnackbar({
+            message: 'Failed to load contacts',
+            type: SnackbarType.ERROR,
+          }),
+        );
+      } finally {
+        setLoading(false);
       }
     };
-  }, []);
 
-  const handleSearch = useCallback(
-    (query: string) => {
-      setSearchQuery(query);
+    loadAllUsers();
+  }, [user, existingMemberIds, dispatch]);
 
-      if (searchTimeoutRef.current) {
-        clearTimeout(searchTimeoutRef.current);
-      }
-
-      if (!query || !query.trim()) {
-        setSearchResults([]);
-        setSearchError('');
-        return;
-      }
-
-      const trimmedQuery = query.trim();
-
-      if (trimmedQuery.length < 2) {
-        setSearchResults([]);
-        setSearchError('');
-        return;
-      }
-
-      searchTimeoutRef.current = setTimeout(async () => {
-        setIsSearching(true);
-        setSearchError('');
-
-        try {
-          const searchPromise = UserService.searchUser(trimmedQuery);
-          const timeoutPromise = new Promise<null>((resolve) =>
-            setTimeout(() => {
-              resolve(null);
-            }, 5000),
-          );
-
-          const foundUser = await Promise.race([searchPromise, timeoutPromise]);
-
-          if (foundUser) {
-            const isCurrentUser = foundUser.uid === user?.uid;
-            const isExistingMember =
-              currentChat?.participants?.includes(foundUser.uid);
-            const isAlreadySelected = selectedMembers.includes(foundUser.uid);
-
-            if (isCurrentUser) {
-              setSearchResults([]);
-              setSearchError('This is your own profile');
-            } else if (isExistingMember) {
-              setSearchResults([]);
-              setSearchError('User is already in the group');
-            } else if (isAlreadySelected) {
-              setSearchResults([]);
-              setSearchError('User already selected');
-            } else {
-              setSearchResults([foundUser]);
-              setSearchError('');
-            }
-          } else {
-            setSearchResults([]);
-            setSearchError('No user found');
-          }
-        } catch (error) {
-          setSearchError('Error searching user');
-          setSearchResults([]);
-        } finally {
-          setIsSearching(false);
-        }
-      }, 300);
-    },
-    [user, currentChat, selectedMembers],
-  );
-
-  const handleSelectMember = (selectedUser: User) => {
-    if (selectedMembers.includes(selectedUser.uid)) {
-      setSelectedMembers(selectedMembers.filter(id => id !== selectedUser.uid));
-    } else {
-      setSelectedMembers([...selectedMembers, selectedUser.uid]);
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setFilteredUsers(allUsers);
+      return;
     }
-    setSearchQuery('');
-    setSearchResults([]);
+
+    const query = searchQuery.toLowerCase().trim();
+    const filtered = allUsers.filter(
+      (contact) =>
+        contact.displayName?.toLowerCase().includes(query) ||
+        contact.email?.toLowerCase().includes(query) ||
+        contact.username?.toLowerCase().includes(query) ||
+        contact.phoneNumber?.includes(query),
+    );
+    setFilteredUsers(filtered);
+  }, [searchQuery, allUsers]);
+
+  const handleToggleSelect = (userId: string) => {
+    setSelectedMembers((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(userId)) {
+        newSet.delete(userId);
+      } else {
+        newSet.add(userId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedMembers.size === filteredUsers.length) {
+      setSelectedMembers(new Set());
+    } else {
+      setSelectedMembers(new Set(filteredUsers.map((u) => u.uid)));
+    }
   };
 
   const handleAddMembers = async () => {
-    if (selectedMembers.length === 0 || !user) {
-      Alert.alert('Error', 'Please select at least one member to add');
+    if (selectedMembers.size === 0) {
+      dispatch(
+        addSnackbar({
+          message: 'Please select at least one member to add',
+          type: SnackbarType.WARNING,
+        }),
+      );
       return;
     }
 
     try {
       setAddingMembers(true);
-      await GroupService.addMembers(chatId, selectedMembers, user.uid);
-      Alert.alert('Success', 'Members added successfully', [
-        {
-          text: 'OK',
-          onPress: () => navigation.goBack(),
-        },
-      ]);
+      const memberIds = Array.from(selectedMembers);
+      await GroupService.addMembers(chatId, memberIds, user?.uid || '');
+      
+      dispatch(
+        addSnackbar({
+          message: `${memberIds.length} member${memberIds.length > 1 ? 's' : ''} added successfully`,
+          type: SnackbarType.SUCCESS,
+        }),
+      );
+      
+      navigation.goBack();
     } catch (error: any) {
-      Alert.alert(
-        'Error',
-        error?.message || 'Failed to add members. Please try again.',
+      dispatch(
+        addSnackbar({
+          message: error?.message || 'Failed to add members. Please try again.',
+          type: SnackbarType.ERROR,
+        }),
       );
     } finally {
       setAddingMembers(false);
     }
   };
 
-  // Render search result item
-  const renderSearchResult = ({item}: {item: User}) => {
-    const displayName =
-      item.displayName || item.email || item.username || 'Unknown User';
-    const subtitle = item.email || item.phoneNumber || item.username || '';
-    const isSelected = selectedMembers.includes(item.uid);
+  const renderContactItem = ({item}: {item: User}) => {
+    const displayName = item.displayName || item.email || item.username || 'Unknown';
+    const subtitle = item.email || item.phoneNumber || '';
+    const isSelected = selectedMembers.has(item.uid);
 
     return (
       <TouchableOpacity
-        style={[
-          styles.searchResultItem,
-          isSelected && styles.searchResultItemSelected,
-        ]}
-        onPress={() => handleSelectMember(item)}>
-        <View style={styles.searchAvatar}>
-          <Text style={styles.searchAvatarText}>
-            {StringUtils.getInitials(displayName)}
-          </Text>
-        </View>
-        <View style={styles.searchResultContent}>
-          <Text style={styles.searchResultName} numberOfLines={1}>
+        style={[styles.contactItem, isSelected && styles.contactItemSelected]}
+        onPress={() => handleToggleSelect(item.uid)}
+        activeOpacity={0.7}>
+        <Avatar
+          name={displayName}
+          imageUri={item.photoURL || item.avatar}
+          size={50}
+        />
+        <View style={styles.contactInfo}>
+          <Text style={styles.contactName} numberOfLines={1}>
             {displayName}
           </Text>
           {subtitle && (
-            <Text style={styles.searchResultSubtitle} numberOfLines={1}>
+            <Text style={styles.contactSubtitle} numberOfLines={1}>
               {subtitle}
             </Text>
           )}
         </View>
-        {isSelected && (
-          <View style={styles.selectedIndicator}>
-            <Text style={styles.selectedIndicatorText}>✓</Text>
-          </View>
-        )}
+        <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+          {isSelected && <Icon name="checkmark" size={20} color={colors.white} />}
+        </View>
       </TouchableOpacity>
-    );
-  };
-
-  // Render selected member
-  const renderSelectedMember = ({item: userId}: {item: string}) => {
-    // For now, just show UID. In production, you'd fetch user details
-    return (
-      <View style={styles.selectedMemberChip}>
-        <Text style={styles.selectedMemberText}>{userId.substring(0, 8)}</Text>
-        <TouchableOpacity
-          onPress={() =>
-            setSelectedMembers(selectedMembers.filter(id => id !== userId))
-          }>
-          <Text style={styles.removeButton}>✕</Text>
-        </TouchableOpacity>
-      </View>
     );
   };
 
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
+      <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" />
+      
       <View style={[styles.header, {paddingTop: insets.top + verticalScale(12)}]}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backButton}>{strings.back}</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Icon name="arrow-back" size={24} color="#1F2937" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Add Members</Text>
-        <TouchableOpacity
-          onPress={handleAddMembers}
-          disabled={selectedMembers.length === 0 || addingMembers}>
-          <Text
-            style={[
-              styles.addButton,
-              (selectedMembers.length === 0 || addingMembers) &&
-                styles.addButtonDisabled,
-            ]}>
-            {addingMembers ? 'Adding...' : 'Add'}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.placeholder} />
       </View>
 
-      {/* Selected Members */}
-      {selectedMembers.length > 0 && (
-        <View style={styles.selectedContainer}>
-          <Text style={styles.selectedLabel}>
-            Selected ({selectedMembers.length}):
-          </Text>
-          <FlatList
-            data={selectedMembers}
-            renderItem={renderSelectedMember}
-            keyExtractor={item => item}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.selectedList}
-          />
-        </View>
-      )}
-
-      {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
+          <Icon name="search-outline" size={20} color="#9CA3AF" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search by username, phone, or email..."
-            placeholderTextColor={colors.textSecondary}
+            placeholder="Search contacts..."
+            placeholderTextColor="#9CA3AF"
             value={searchQuery}
-            onChangeText={handleSearch}
+            onChangeText={setSearchQuery}
             autoCapitalize="none"
             autoCorrect={false}
-            keyboardType="default"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity
-              onPress={() => {
-                setSearchQuery('');
-                setSearchResults([]);
-                setSearchError('');
-                if (searchTimeoutRef.current) {
-                  clearTimeout(searchTimeoutRef.current);
-                }
-              }}
-              style={styles.clearButton}>
-              <Text style={styles.clearButtonText}>✕</Text>
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Icon name="close-circle" size={20} color="#9CA3AF" />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* Search Results */}
-      {isSearching && (
+      {filteredUsers.length > 0 && (
+        <View style={styles.selectAllContainer}>
+          <TouchableOpacity
+            style={styles.selectAllButton}
+            onPress={handleSelectAll}
+            activeOpacity={0.7}>
+            <Text style={styles.selectAllText}>
+              {selectedMembers.size === filteredUsers.length
+                ? 'Deselect All'
+                : 'Select All'}
+            </Text>
+          </TouchableOpacity>
+          {selectedMembers.size > 0 && (
+            <Text style={styles.selectedCount}>
+              {selectedMembers.size} selected
+            </Text>
+          )}
+        </View>
+      )}
+
+      {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={styles.loadingText}>Searching...</Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Loading contacts...</Text>
         </View>
-      )}
-
-      {searchError && !isSearching && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{searchError}</Text>
+      ) : filteredUsers.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Icon name="people-outline" size={64} color={colors.textSecondary} />
+          <Text style={styles.emptyText}>
+            {searchQuery ? 'No contacts found' : 'No contacts available'}
+          </Text>
         </View>
-      )}
-
-      {searchResults.length > 0 && !isSearching && (
+      ) : (
         <FlatList
-          data={searchResults}
-          renderItem={renderSearchResult}
-          keyExtractor={item => item.uid}
-          style={styles.resultsList}
+          data={filteredUsers}
+          renderItem={renderContactItem}
+          keyExtractor={(item) => item.uid}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
         />
       )}
 
-      {!isSearching &&
-        searchResults.length === 0 &&
-        !searchError &&
-        searchQuery.length >= 2 && (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No users found</Text>
-          </View>
-        )}
+      {selectedMembers.size > 0 && (
+        <View style={[styles.confirmContainer, {paddingBottom: insets.bottom + verticalScale(12)}]}>
+          <TouchableOpacity
+            style={[styles.confirmButton, addingMembers && styles.confirmButtonDisabled]}
+            onPress={handleAddMembers}
+            disabled={addingMembers}
+            activeOpacity={0.8}>
+            {addingMembers ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <>
+                <Text style={styles.confirmButtonText}>
+                  Add {selectedMembers.size} Member{selectedMembers.size > 1 ? 's' : ''}
+                </Text>
+                <Icon name="checkmark-circle" size={24} color={colors.white} />
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 };
@@ -326,70 +304,36 @@ const AddMembersScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.white,
   },
   header: {
-    backgroundColor: colors.primary,
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: horizontalScale(16),
     paddingBottom: verticalScale(12),
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   backButton: {
-    fontSize: moderateScale(16),
-    ...fonts.medium,
-    color: colors.white,
+    padding: horizontalScale(8),
+    marginRight: horizontalScale(8),
   },
   headerTitle: {
     fontSize: moderateScale(18),
     ...fonts.semiBold,
-    color: colors.white,
+    color: '#1F2937',
     flex: 1,
     textAlign: 'center',
   },
-  addButton: {
-    fontSize: moderateScale(16),
-    ...fonts.semiBold,
-    color: colors.white,
-  },
-  addButtonDisabled: {
-    opacity: 0.5,
-  },
-  selectedContainer: {
-    backgroundColor: colors.white,
-    paddingVertical: verticalScale(12),
-    paddingHorizontal: horizontalScale(16),
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  selectedLabel: {
-    fontSize: moderateScale(14),
-    ...fonts.semiBold,
-    color: colors.text,
-    marginBottom: verticalScale(8),
-  },
-  selectedList: {
-    gap: horizontalScale(8),
-  },
-  selectedMemberChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    paddingHorizontal: horizontalScale(12),
-    paddingVertical: verticalScale(6),
-    borderRadius: moderateScale(16),
-    marginRight: horizontalScale(8),
-  },
-  selectedMemberText: {
-    fontSize: moderateScale(12),
-    ...fonts.medium,
-    color: colors.white,
-    marginRight: horizontalScale(6),
-  },
-  removeButton: {
-    fontSize: moderateScale(14),
-    color: colors.white,
+  placeholder: {
+    width: horizontalScale(40),
   },
   searchContainer: {
     backgroundColor: colors.white,
@@ -401,10 +345,11 @@ const styles = StyleSheet.create({
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: moderateScale(20),
+    backgroundColor: '#F3F4F6',
+    borderRadius: moderateScale(12),
     paddingHorizontal: horizontalScale(16),
-    paddingVertical: verticalScale(8),
+    paddingVertical: verticalScale(10),
+    gap: horizontalScale(12),
   },
   searchInput: {
     flex: 1,
@@ -412,39 +357,9 @@ const styles = StyleSheet.create({
     ...fonts.regular,
     color: colors.text,
   },
-  clearButton: {
-    padding: horizontalScale(4),
-  },
-  clearButtonText: {
-    fontSize: moderateScale(18),
-    color: colors.textSecondary,
-  },
-  loadingContainer: {
+  selectAllContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: verticalScale(20),
-  },
-  loadingText: {
-    fontSize: moderateScale(14),
-    ...fonts.regular,
-    color: colors.textSecondary,
-    marginLeft: horizontalScale(8),
-  },
-  errorContainer: {
-    padding: horizontalScale(16),
-    alignItems: 'center',
-  },
-  errorText: {
-    fontSize: moderateScale(14),
-    ...fonts.regular,
-    color: colors.error,
-  },
-  resultsList: {
-    flex: 1,
-  },
-  searchResultItem: {
-    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: horizontalScale(16),
     paddingVertical: verticalScale(12),
@@ -452,49 +367,73 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  searchResultItemSelected: {
-    backgroundColor: colors.primaryLight + '20',
+  selectAllButton: {
+    paddingVertical: verticalScale(6),
   },
-  searchAvatar: {
-    width: moderateScale(40),
-    height: moderateScale(40),
-    borderRadius: moderateScale(20),
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: horizontalScale(12),
-  },
-  searchAvatarText: {
-    fontSize: moderateScale(16),
+  selectAllText: {
+    fontSize: moderateScale(15),
     ...fonts.semiBold,
-    color: colors.white,
+    color: colors.primary,
   },
-  searchResultContent: {
+  selectedCount: {
+    fontSize: moderateScale(14),
+    ...fonts.medium,
+    color: colors.textSecondary,
+  },
+  listContent: {
+    paddingBottom: verticalScale(20),
+  },
+  contactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: horizontalScale(16),
+    paddingVertical: verticalScale(14),
+    backgroundColor: colors.white,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  contactItemSelected: {
+    backgroundColor: '#F0F9FF',
+  },
+  contactInfo: {
     flex: 1,
+    marginLeft: horizontalScale(12),
   },
-  searchResultName: {
+  contactName: {
     fontSize: moderateScale(16),
     ...fonts.semiBold,
     color: colors.text,
     marginBottom: verticalScale(2),
   },
-  searchResultSubtitle: {
+  contactSubtitle: {
     fontSize: moderateScale(14),
     ...fonts.regular,
     color: colors.textSecondary,
   },
-  selectedIndicator: {
+  checkbox: {
     width: moderateScale(24),
     height: moderateScale(24),
     borderRadius: moderateScale(12),
+    borderWidth: 2,
+    borderColor: colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+  },
+  checkboxSelected: {
     backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  selectedIndicatorText: {
-    fontSize: moderateScale(16),
-    ...fonts.semiBold,
-    color: colors.white,
+  loadingText: {
+    fontSize: moderateScale(14),
+    ...fonts.regular,
+    color: colors.textSecondary,
+    marginTop: verticalScale(12),
   },
   emptyContainer: {
     flex: 1,
@@ -506,8 +445,37 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(16),
     ...fonts.regular,
     color: colors.textSecondary,
+    marginTop: verticalScale(16),
+  },
+  confirmContainer: {
+    backgroundColor: colors.white,
+    paddingHorizontal: horizontalScale(16),
+    paddingTop: verticalScale(12),
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: -2},
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  confirmButton: {
+    backgroundColor: colors.primary,
+    borderRadius: moderateScale(12),
+    paddingVertical: verticalScale(14),
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: horizontalScale(8),
+  },
+  confirmButtonDisabled: {
+    opacity: 0.6,
+  },
+  confirmButtonText: {
+    fontSize: moderateScale(16),
+    ...fonts.semiBold,
+    color: colors.white,
   },
 });
 
 export default AddMembersScreen;
-

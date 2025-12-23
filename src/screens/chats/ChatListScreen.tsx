@@ -40,7 +40,6 @@ const ChatListScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'calls' | 'messages' | 'settings'>('messages');
-  const [showFABMenu, setShowFABMenu] = useState(false);
   
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
@@ -316,20 +315,7 @@ const ChatListScreen: React.FC = () => {
   };
 
   const handleFABPress = () => {
-    setShowFABMenu(!showFABMenu);
-  };
-
-  const handleFABOption = (option: string) => {
-    setShowFABMenu(false);
-    switch (option) {
-      case 'Chat':
-        break;
-      case 'Group':
-        (navigation as any).navigate('GroupCreateScreen');
-        break;
-      default:
-        break;
-    }
+    (navigation as any).navigate('GroupCreateScreen');
   };
 
   if (loading) {
@@ -422,38 +408,8 @@ const ChatListScreen: React.FC = () => {
         style={showSearchResults ? styles.chatListHidden : undefined}
       />
 
-      {showFABMenu && (
-        <View style={styles.fabMenu}>
-          <TouchableOpacity
-            style={[styles.fabMenuItem, styles.fabMenuItemBorder]}
-            onPress={() => handleFABOption('Chat')}>
-            <Text style={styles.fabMenuText}>Chat</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.fabMenuItem, styles.fabMenuItemBorder]}
-            onPress={() => handleFABOption('Contact')}>
-            <Text style={styles.fabMenuText}>Contact</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.fabMenuItem, styles.fabMenuItemBorder]}
-            onPress={() => handleFABOption('Group')}>
-            <Text style={styles.fabMenuText}>Group</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.fabMenuItem, styles.fabMenuItemBorder]}
-            onPress={() => handleFABOption('Broadcast')}>
-            <Text style={styles.fabMenuText}>Broadcast</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.fabMenuItem}
-            onPress={() => handleFABOption('Team')}>
-            <Text style={styles.fabMenuText}>Team</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       <TouchableOpacity style={styles.fab} onPress={handleFABPress}>
-        <Text style={styles.fabText}>+</Text>
+        <Icon name="add" size={28} color="#FFFFFF" />
       </TouchableOpacity>
 
       <BottomNavBar activeTab={activeTab} onTabPress={handleTabPress} />
@@ -586,48 +542,15 @@ const styles = StyleSheet.create({
     width: horizontalScale(56),
     height: horizontalScale(56),
     borderRadius: horizontalScale(28),
-    backgroundColor: '#1F2937',
+    backgroundColor: '#1E40AF',
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,
     shadowColor: '#000',
     shadowOffset: {width: 0, height: 4},
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.4,
     shadowRadius: 8,
     zIndex: 10,
-  },
-  fabText: {
-    fontSize: moderateScale(32),
-    ...fonts.bold,
-    color: '#FFFFFF',
-  },
-  fabMenu: {
-    position: 'absolute',
-    right: horizontalScale(24),
-    bottom: verticalScale(170),
-    backgroundColor: '#FFFFFF',
-    borderRadius: moderateScale(12),
-    paddingVertical: verticalScale(8),
-    minWidth: horizontalScale(140),
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: {width: 0, height: 4},
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    zIndex: 9,
-  },
-  fabMenuItem: {
-    paddingHorizontal: horizontalScale(20),
-    paddingVertical: verticalScale(12),
-  },
-  fabMenuItemBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  fabMenuText: {
-    fontSize: moderateScale(15),
-    ...fonts.medium,
-    color: '#1F2937',
   },
   searchResultsContainer: {
     backgroundColor: '#FFFFFF',

@@ -1,0 +1,428 @@
+Perfect. Now we design the **Socket.IO server as a real project**, not a toy file.
+This server’s job is **only real-time behavior**, just like WhatsApp’s realtime layer.
+
+No Firebase logic here.
+No database writes here.
+Firebase remains the source of truth.
+
+I’ll give you:
+
+1. What this server is responsible for
+2. Final folder structure
+3. File-by-file responsibilities
+4. Event contracts (client ↔ server)
+5. How it connects with Firebase logic (conceptually)
+
+This is the **final server design** you should implement.
+
+---
+
+# 1️⃣ What the Socket.IO server DOES (and does NOT do)
+
+### ✅ It DOES
+
+* Maintain socket connections
+* Manage online/offline presence
+* Handle typing indicators
+* Deliver messages instantly
+* Broadcast group events
+* Track which users are connected
+* Join users to chat rooms
+
+### ❌ It does NOT
+
+* Store messages
+* Validate permissions deeply
+* Replace Firebase
+* Handle authentication logic fully
+
+Think of it as **WhatsApp’s realtime router** 📡
+
+---
+
+# 2️⃣ Final Socket.IO Server Project Structure
+
+Create this as a **separate project**, outside the React Native app.
+
+```
+socket-server/
+├── src/
+│   ├── server.ts
+│   ├── app.ts
+│   ├── socket/
+│   │   ├── index.ts
+│   │   ├── socket.auth.ts
+│   │   ├── socket.events.ts
+│   │   ├── socket.rooms.ts
+│   │   └── socket.presence.ts
+│   │
+│   ├── services/
+│   │   ├── presence.service.ts
+│   │   ├── typing.service.ts
+│   │   └── message.service.ts
+│   │
+│   ├── store/
+│   │   └── connections.store.ts
+│   │
+│   ├── utils/
+│   │   └── logger.ts
+│   │
+│   └── config/
+│       └── env.ts
+│
+├── package.json
+├── tsconfig.json
+└── .env
+```
+
+This structure scales cleanly and keeps responsibilities isolated.
+
+---
+
+# 3️⃣ File-by-file explanation (important)
+
+## `src/server.ts`
+
+**Entry point**
+
+* Creates HTTP server
+* Starts listening on a port
+* Nothing socket-specific here
+
+```ts
+import { createServer } from 'http'
+import app from './app'
+
+const server = createServer(app)
+server.listen(3000, () => {
+  console.log('Socket server running on 3000')
+})
+```
+
+---
+
+## `src/app.ts`
+
+**Express + Socket bootstrap**
+
+* Creates Express app
+* Attaches Socket.IO to HTTP server
+
+```ts
+import express from 'express'
+import { Server } from 'socket.io'
+import setupSocket from './socket'
+
+const app = express()
+
+export default app
+
+export function initSocket(server: any) {
+  const io = new Server(server, {
+    cors: { origin: '*' },
+  })
+  setupSocket(io)
+}
+```
+
+---
+
+## `src/socket/index.ts`
+
+**Socket lifecycle manager**
+
+* Runs on every socket connection
+* Applies auth
+* Registers events
+
+```ts
+export default function setupSocket(io) {
+  io.on('connection', socket => {
+    authenticate(socket)
+    registerEvents(io, socket)
+  })
+}
+```
+
+---
+
+## `src/socket/socket.auth.ts`
+
+**Socket authentication layer**
+
+Purpose:
+
+* Attach userId to socket
+* Reject unauthenticated users
+
+```ts
+export function authenticate(socket) {
+  const { userId } = socket.handshake.auth
+  if (!userId) {
+    socket.disconnect()
+    return
+  }
+  socket.userId = userId
+}
+```
+
+Firebase Auth token validation can be added later.
+
+---
+
+## `src/socket/socket.rooms.ts`
+
+**Room management**
+
+Purpose:
+
+* Join chat rooms
+* Leave chat rooms
+
+```ts
+export function joinChat(socket, chatId) {
+  socket.join(chatId)
+}
+
+export function leaveChat(socket, chatId) {
+  socket.leave(chatId)
+}
+```
+
+Each `chatId` = one room.
+
+---
+
+## `src/socket/socket.presence.ts`
+
+**Online / offline tracking**
+
+```ts
+import { setOnline, setOffline } from '../services/presence.service'
+
+export function handlePresence(socket) {
+  setOnline(socket.userId)
+
+  socket.on('disconnect', () => {
+    setOffline(socket.userId)
+  })
+}
+```
+
+This syncs with Firebase presence updates.
+
+---
+
+## `src/socket/socket.events.ts`
+
+**All realtime events live here**
+
+This is the heart.
+
+```ts
+export function registerEvents(io, socket) {
+
+  socket.on('join_chat', chatId => {
+    socket.join(chatId)
+  })
+
+  socket.on('leave_chat', chatId => {
+    socket.leave(chatId)
+  })
+
+  socket.on('send_message', payload => {
+    socket.to(payload.chatId).emit('new_message', payload)
+  })
+
+  socket.on('typing', ({ chatId }) => {
+    socket.to(chatId).emit('typing', {
+      chatId,
+      userId: socket.userId
+    })
+  })
+
+  socket.on('stop_typing', ({ chatId }) => {
+    socket.to(chatId).emit('stop_typing', {
+      chatId,
+      userId: socket.userId
+    })
+  })
+}
+```
+
+---
+
+# 4️⃣ Services layer (business helpers)
+
+## `presence.service.ts`
+
+Tracks user online state.
+
+```ts
+const onlineUsers = new Set()
+
+export function setOnline(uid) {
+  onlineUsers.add(uid)
+}
+
+export function setOffline(uid) {
+  onlineUsers.delete(uid)
+}
+
+export function isOnline(uid) {
+  return onlineUsers.has(uid)
+}
+```
+
+Later you sync this with Firebase.
+
+---
+
+## `typing.service.ts`
+
+Optional helper for throttling typing events.
+
+```ts
+export function canEmitTyping(uid, chatId) {
+  return true
+}
+```
+
+---
+
+## `message.service.ts`
+
+Currently thin.
+
+Purpose:
+
+* Normalize message payload
+* Enforce shape
+
+```ts
+export function buildMessage(data) {
+  return {
+    ...data,
+    deliveredAt: Date.now(),
+  }
+}
+```
+
+---
+
+# 5️⃣ In-memory store
+
+## `connections.store.ts`
+
+Maps users to sockets.
+
+```ts
+const connections = new Map()
+
+export function addConnection(uid, socketId) {
+  connections.set(uid, socketId)
+}
+
+export function removeConnection(uid) {
+  connections.delete(uid)
+}
+
+export function getSocket(uid) {
+  return connections.get(uid)
+}
+```
+
+This enables:
+
+* Direct delivery
+* Presence checks
+* Debugging
+
+---
+
+# 6️⃣ Event contract (VERY IMPORTANT)
+
+This is the **API** between mobile and server.
+
+### Client → Server
+
+| Event        | Payload               |
+| ------------ | --------------------- |
+| join_chat    | `{ chatId }`          |
+| leave_chat   | `{ chatId }`          |
+| send_message | `{ chatId, message }` |
+| typing       | `{ chatId }`          |
+| stop_typing  | `{ chatId }`          |
+
+---
+
+### Server → Client
+
+| Event       | Payload               |
+| ----------- | --------------------- |
+| new_message | `{ chatId, message }` |
+| typing      | `{ chatId, userId }`  |
+| stop_typing | `{ chatId, userId }`  |
+| presence    | `{ userId, online }`  |
+
+---
+
+# 7️⃣ How this server works with Firebase (important)
+
+### Message send flow
+
+1. Mobile writes message to Firebase
+2. Mobile emits `send_message`
+3. Socket server broadcasts
+4. Receivers show instantly
+5. Firebase listener syncs state
+
+### Presence flow
+
+1. Socket connect → online
+2. Socket disconnect → offline
+3. Mobile updates `/presence` in Firebase
+
+Socket never stores permanent data.
+
+---
+
+# 8️⃣ Why this structure is correct
+
+* Clean separation of concerns
+* Easy to debug
+* Easy to deploy
+* Easy to extend (calls, reactions)
+* Mirrors how WhatsApp-like apps are built
+
+This is **not overengineering**.
+This is *just enough engineering*.
+
+---
+
+## 🔒 Final advice (important)
+
+Keep this server:
+
+* Stateless
+* Thin
+* Replaceable
+
+Firebase is your memory.
+Socket.IO is your speed.
+
+---
+
+### Next recommended steps
+
+1. Add **Firebase Auth token validation** to sockets
+2. Add **presence sync to Firebase**
+3. Deploy server (Render / Railway)
+4. Connect mobile client
+
+If you want, next I can:
+
+* Add **auth verification using Firebase Admin**
+* Or show **exact client-side socket usage**
+
+Just tell me what to build next 🚀

@@ -142,7 +142,6 @@ const SplashScreen: React.FC = () => {
     return () => {
       unsubscribe();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -260,4 +259,3 @@ const styles = StyleSheet.create({
 });
 
 export default SplashScreen;
-

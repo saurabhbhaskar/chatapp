@@ -9,10 +9,10 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   Modal,
   ActivityIndicator,
   Keyboard,
+  Alert,
 } from 'react-native';
 import {useNavigation, useRoute} from '@react-navigation/native';
 import {useDispatch, useSelector} from 'react-redux';
@@ -27,6 +27,7 @@ import {colors} from '../../Helper/colors';
 import {fonts} from '../../Helper/fontsUtils';
 import {MessageService, ChatService} from '../../services';
 import {setMessages, updateMessage, setCurrentChat} from '../../Redux/chatSlice';
+import {addSnackbar, SnackbarType} from '../../Redux/snackbarSlice';
 import {Message, User} from '../../types';
 import {getUser} from '../../firebase/database';
 import Avatar from '../../Components/Common/Avatar';
@@ -92,7 +93,6 @@ const ChatScreen: React.FC = () => {
     return () => unsubscribe();
   }, [chatId, user, dispatch]);
 
-  // Keyboard handling
   useEffect(() => {
     const keyboardWillShow = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
@@ -117,7 +117,6 @@ const ChatScreen: React.FC = () => {
     };
   }, []);
 
-  // Cache user info for group messages
   useEffect(() => {
     if (currentChat?.type !== 'group' || !chatMessages.length || !user) return;
 
@@ -174,7 +173,6 @@ const ChatScreen: React.FC = () => {
     };
 
     fetchUserInfo();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatMessages.length, currentChat?.type, user?.uid]);
 
   useEffect(() => {
@@ -306,15 +304,31 @@ const ChatScreen: React.FC = () => {
       );
       setShowMessageMenu(false);
       setSelectedMessage(null);
+      dispatch(
+        addSnackbar({
+          message: 'Message deleted',
+          type: SnackbarType.SUCCESS,
+        }),
+      );
     } catch {
-      Alert.alert('Error', 'Failed to delete message');
+      dispatch(
+        addSnackbar({
+          message: 'Failed to delete message',
+          type: SnackbarType.ERROR,
+        }),
+      );
     }
   };
 
   const handleDeleteForEveryone = async () => {
     if (!selectedMessage || !user) return;
     if (selectedMessage.senderId !== user.uid) {
-      Alert.alert('Error', 'You can only delete your own messages');
+      dispatch(
+        addSnackbar({
+          message: 'You can only delete your own messages',
+          type: SnackbarType.WARNING,
+        }),
+      );
       return;
     }
     Alert.alert(
@@ -343,8 +357,19 @@ const ChatScreen: React.FC = () => {
               );
               setShowMessageMenu(false);
               setSelectedMessage(null);
+              dispatch(
+                addSnackbar({
+                  message: 'Message deleted for everyone',
+                  type: SnackbarType.SUCCESS,
+                }),
+              );
             } catch {
-              Alert.alert('Error', 'Failed to delete message');
+              dispatch(
+                addSnackbar({
+                  message: 'Failed to delete message',
+                  type: SnackbarType.ERROR,
+                }),
+              );
             }
           },
         },
@@ -354,7 +379,12 @@ const ChatScreen: React.FC = () => {
 
   const handleForward = async () => {
     if (!selectedMessage) return;
-    Alert.alert('Forward', 'Forward functionality - Coming soon');
+    dispatch(
+      addSnackbar({
+        message: 'Forward functionality - Coming soon',
+        type: SnackbarType.INFO,
+      }),
+    );
     setShowMessageMenu(false);
     setSelectedMessage(null);
   };
@@ -371,7 +401,6 @@ const ChatScreen: React.FC = () => {
   };
 
   const renderMessage = ({item}: {item: Message}) => {
-    // Handle system messages separately
     if (item.type === 'system') {
       return (
         <SystemMessage
@@ -392,14 +421,12 @@ const ChatScreen: React.FC = () => {
       return null;
     }
 
-    // Get sender info for group messages
     const senderUser = item.senderId ? userCache[item.senderId] : null;
     const senderName = isOwnMessage
       ? 'You'
       : senderUser?.displayName || senderUser?.email || senderUser?.username || 'User';
     const senderAvatar = senderUser?.photoURL;
 
-    // Show sender info for group messages (only for others' messages)
     const showSenderInfo = currentChat?.type === 'group' && !isOwnMessage;
 
     return (
@@ -425,6 +452,9 @@ const ChatScreen: React.FC = () => {
         forwardedFrom={item.forwardedFrom ? 'Forwarded' : undefined}
         isDeleted={isDeleted}
         onLongPress={() => handleLongPressMessage(item)}
+        onReply={() => {
+          setReplyToMessage(item);
+        }}
         senderName={showSenderInfo ? senderName : undefined}
         senderAvatar={showSenderInfo ? senderAvatar : undefined}
         showSenderInfo={showSenderInfo}
@@ -679,7 +709,7 @@ const styles = StyleSheet.create({
   },
   messagesContainer: {
     flex: 1,
-    backgroundColor: '#F2F2F7',
+    backgroundColor: '#F0F4F8',
   },
   messagesList: {
     paddingHorizontal: horizontalScale(16),

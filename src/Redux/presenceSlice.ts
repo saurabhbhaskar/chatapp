@@ -1,8 +1,13 @@
 import {createSlice, PayloadAction} from '@reduxjs/toolkit';
-import {UserPresence} from '../types/user';
+
+interface PresenceData {
+  uid: string;
+  online: boolean;
+  lastSeen: number;
+}
 
 interface PresenceState {
-  presences: {[uid: string]: UserPresence};
+  presences: {[uid: string]: PresenceData};
 }
 
 const initialState: PresenceState = {
@@ -13,12 +18,12 @@ export const presenceSlice = createSlice({
   name: 'presence',
   initialState,
   reducers: {
-    setPresence: (state, action: PayloadAction<UserPresence>) => {
+    setPresence: (state, action: PayloadAction<PresenceData>) => {
       state.presences[action.payload.uid] = action.payload;
     },
     setPresences: (
       state,
-      action: PayloadAction<{[uid: string]: UserPresence}>,
+      action: PayloadAction<{[uid: string]: PresenceData}>,
     ) => {
       state.presences = {...state.presences, ...action.payload};
     },

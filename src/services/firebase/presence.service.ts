@@ -4,7 +4,6 @@ import {
   getUserPresence,
   watchUserPresence,
 } from '../../firebase/presence';
-import {UserPresence} from '../../types/user';
 
 export const PresenceService = {
   /**
@@ -24,7 +23,7 @@ export const PresenceService = {
   /**
    * Get user presence
    */
-  getPresence: async (uid: string): Promise<UserPresence | null> => {
+  getPresence: async (uid: string): Promise<{online: boolean; lastSeen: number} | null> => {
     return getUserPresence(uid);
   },
 
@@ -33,7 +32,7 @@ export const PresenceService = {
    */
   watchPresence: (
     uid: string,
-    callback: (presence: UserPresence | null) => void,
+    callback: (presence: {online: boolean; lastSeen: number} | null) => void,
   ): (() => void) => {
     return watchUserPresence(uid, callback);
   },

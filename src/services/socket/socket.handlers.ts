@@ -31,7 +31,7 @@ export const setupSocketHandlers = (
     dispatch(
       setPresence({
         uid: data.uid,
-        status: 'online',
+        online: true,
         lastSeen: data.lastSeen,
       }),
     );
@@ -41,7 +41,7 @@ export const setupSocketHandlers = (
     dispatch(
       setPresence({
         uid: data.uid,
-        status: 'offline',
+        online: false,
         lastSeen: data.lastSeen,
       }),
     );

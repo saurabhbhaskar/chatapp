@@ -19,7 +19,7 @@ import {
 } from '../../Components/Common/View/ResponsiveDesign';
 import {colors} from '../../Helper/colors';
 import {fonts} from '../../Helper/fontsUtils';
-import {ChatService} from '../../services';
+import {ChatService, PresenceService} from '../../services';
 import {Chat, User} from '../../types';
 import {getUser} from '../../firebase/database';
 import Avatar from '../../Components/Common/Avatar';
@@ -36,15 +36,23 @@ const GroupInfoScreen: React.FC = () => {
   const [otherUser, setOtherUser] = useState<User | null>(null);
   const [members, setMembers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [otherUserPresence, setOtherUserPresence] = useState<{online: boolean; lastSeen: number} | null>(null);
+  const [membersPresence, setMembersPresence] = useState<{[uid: string]: {online: boolean; lastSeen: number}}>({});
 
   useEffect(() => {
     if (!chatId) return;
+
+    let presenceUnsubscribes: (() => void)[] = [];
 
     const unsubscribe = ChatService.watchChat(chatId, async (chatData) => {
       if (chatData) {
         setChat(chatData);
         
-        // For direct chat, get the other user's info
+        presenceUnsubscribes.forEach((unsub) => unsub());
+        presenceUnsubscribes = [];
+        setOtherUserPresence(null);
+        setMembersPresence({});
+        
         if (chatData.type === 'direct' && user) {
           const participants = Array.isArray(chatData.participants)
             ? chatData.participants
@@ -54,11 +62,17 @@ const GroupInfoScreen: React.FC = () => {
             const userData = await getUser(otherUserId);
             if (userData) {
               setOtherUser(userData);
+              const unsubscribePresence = PresenceService.watchPresence(
+                otherUserId,
+                (presence) => {
+                  setOtherUserPresence(presence);
+                }
+              );
+              presenceUnsubscribes.push(unsubscribePresence);
             }
           }
         }
         
-        // For group chat, get all members' info
         if (chatData.type === 'group' && chatData.participants) {
           const participantIds = Array.isArray(chatData.participants)
             ? chatData.participants
@@ -66,14 +80,38 @@ const GroupInfoScreen: React.FC = () => {
           
           const memberPromises = participantIds.map((uid: string) => getUser(uid));
           const memberData = await Promise.all(memberPromises);
-          setMembers(memberData.filter((u): u is User => u !== null));
+          const validMembers = memberData.filter((u): u is User => u !== null);
+          setMembers(validMembers);
+          
+          validMembers.forEach((member) => {
+            if (member.uid === user?.uid) {
+              setMembersPresence((prev) => ({
+                ...prev,
+                [member.uid]: {online: true, lastSeen: Date.now()},
+              }));
+            } else {
+              const unsubscribe = PresenceService.watchPresence(
+                member.uid,
+                (presence) => {
+                  setMembersPresence((prev) => ({
+                    ...prev,
+                    [member.uid]: presence || {online: false, lastSeen: 0},
+                  }));
+                }
+              );
+              presenceUnsubscribes.push(unsubscribe);
+            }
+          });
         }
         
         setLoading(false);
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      presenceUnsubscribes.forEach((unsub) => unsub());
+    };
   }, [chatId, user]);
 
   const getParticipantsArray = (participants: any): string[] => {
@@ -88,7 +126,6 @@ const GroupInfoScreen: React.FC = () => {
 
     return (
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Profile Header */}
         <View style={styles.profileHeader}>
           <Avatar
             name={otherUser.displayName || otherUser.email || otherUser.username || 'User'}
@@ -98,14 +135,16 @@ const GroupInfoScreen: React.FC = () => {
           <Text style={styles.profileName}>
             {otherUser.displayName || otherUser.username || 'User'}
           </Text>
-          {otherUser.status && (
-            <Text style={styles.statusText}>
-              {otherUser.status === 'online' ? 'Online' : 'Offline'}
+          {otherUserPresence && (
+            <Text style={[
+              styles.statusText,
+              otherUserPresence.online ? styles.statusOnline : styles.statusOffline
+            ]}>
+              {otherUserPresence.online ? 'Online' : 'Offline'}
             </Text>
           )}
         </View>
 
-        {/* Profile Details */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>About</Text>
           
@@ -149,13 +188,13 @@ const GroupInfoScreen: React.FC = () => {
             </View>
           )}
 
-          {otherUser.lastSeen && (
+          {otherUserPresence && otherUserPresence.lastSeen > 0 && (
             <View style={styles.infoRow}>
               <Icon name="time-outline" size={20} color={colors.textSecondary} />
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Last Seen</Text>
                 <Text style={styles.infoValue}>
-                  {TimeUtils.formatDate(otherUser.lastSeen)}
+                  {TimeUtils.formatDate(otherUserPresence.lastSeen)}
                 </Text>
               </View>
             </View>
@@ -174,7 +213,6 @@ const GroupInfoScreen: React.FC = () => {
 
     return (
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Group Header */}
         <View style={styles.profileHeader}>
           <Avatar
             name={chat.groupInfo.name}
@@ -190,7 +228,6 @@ const GroupInfoScreen: React.FC = () => {
           </Text>
         </View>
 
-        {/* Group Details */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Group Details</Text>
           
@@ -227,7 +264,6 @@ const GroupInfoScreen: React.FC = () => {
           )}
         </View>
 
-        {/* Members Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Members ({members.length})</Text>
@@ -247,6 +283,7 @@ const GroupInfoScreen: React.FC = () => {
             const isMemberOwner = chat.groupInfo?.createdBy === member.uid;
             const isMemberAdmin = chat.groupInfo?.admins?.includes(member.uid) || false;
             const isCurrentUser = member.uid === user?.uid;
+            const memberPresence = membersPresence[member.uid];
 
             return (
               <TouchableOpacity
@@ -278,11 +315,18 @@ const GroupInfoScreen: React.FC = () => {
                   {member.email && (
                     <Text style={styles.memberEmail}>{member.email}</Text>
                   )}
-                  {member.status && (
-                    <Text style={styles.memberStatus}>
-                      {member.status === 'online' ? 'Online' : 'Offline'}
+                  {isCurrentUser ? (
+                    <Text style={[styles.memberStatus, styles.statusOnline]}>
+                      Online
                     </Text>
-                  )}
+                  ) : memberPresence ? (
+                    <Text style={[
+                      styles.memberStatus,
+                      memberPresence.online ? styles.statusOnline : styles.statusOffline
+                    ]}>
+                      {memberPresence.online ? 'Online' : 'Offline'}
+                    </Text>
+                  ) : null}
                 </View>
                 {(isOwner || isAdmin) && !isCurrentUser && (
                   <TouchableOpacity style={styles.memberActionButton}>
@@ -300,10 +344,10 @@ const GroupInfoScreen: React.FC = () => {
   if (loading) {
     return (
       <View style={styles.container}>
-        <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
+        <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" />
         <View style={[styles.header, {paddingTop: insets.top + verticalScale(12)}]}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Icon name="arrow-back" size={24} color={colors.white} />
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-back" size={24} color="#1F2937" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
             {chat?.type === 'group' ? 'Group Info' : 'Profile'}
@@ -319,10 +363,10 @@ const GroupInfoScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
+      <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" />
       <View style={[styles.header, {paddingTop: insets.top + verticalScale(12)}]}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color={colors.white} />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Icon name="arrow-back" size={24} color="#1F2937" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
           {chat?.type === 'group' ? 'Group Info' : 'Profile'}
@@ -341,20 +385,33 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   header: {
-    backgroundColor: colors.primary,
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: horizontalScale(16),
     paddingBottom: verticalScale(12),
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  backButton: {
+    padding: horizontalScale(8),
+    marginRight: horizontalScale(8),
   },
   headerTitle: {
     fontSize: moderateScale(18),
     ...fonts.semiBold,
-    color: colors.white,
+    color: '#1F2937',
+    flex: 1,
+    textAlign: 'center',
   },
   placeholder: {
-    width: horizontalScale(24),
+    width: horizontalScale(40),
   },
   scrollView: {
     flex: 1,
@@ -366,42 +423,48 @@ const styles = StyleSheet.create({
   },
   profileHeader: {
     alignItems: 'center',
-    paddingVertical: verticalScale(24),
+    paddingVertical: verticalScale(32),
     paddingHorizontal: horizontalScale(16),
     backgroundColor: colors.white,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   profileName: {
-    fontSize: moderateScale(22),
+    fontSize: moderateScale(24),
     ...fonts.bold,
     color: colors.text,
-    marginTop: verticalScale(12),
+    marginTop: verticalScale(16),
     textAlign: 'center',
   },
   groupDescription: {
-    fontSize: moderateScale(14),
+    fontSize: moderateScale(15),
     ...fonts.regular,
     color: colors.textSecondary,
-    marginTop: verticalScale(8),
+    marginTop: verticalScale(10),
     textAlign: 'center',
     paddingHorizontal: horizontalScale(20),
+    lineHeight: moderateScale(22),
   },
   memberCount: {
     fontSize: moderateScale(14),
-    ...fonts.regular,
+    ...fonts.medium,
     color: colors.textSecondary,
-    marginTop: verticalScale(4),
+    marginTop: verticalScale(6),
   },
   statusText: {
     fontSize: moderateScale(14),
     ...fonts.regular,
-    color: colors.success,
     marginTop: verticalScale(4),
+  },
+  statusOnline: {
+    color: colors.success,
+  },
+  statusOffline: {
+    color: colors.textSecondary,
   },
   section: {
     backgroundColor: colors.white,
-    paddingVertical: verticalScale(16),
+    paddingVertical: verticalScale(20),
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -410,20 +473,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: horizontalScale(16),
-    marginBottom: verticalScale(12),
+    marginBottom: verticalScale(16),
   },
   sectionTitle: {
-    fontSize: moderateScale(16),
+    fontSize: moderateScale(17),
     ...fonts.semiBold,
     color: colors.text,
     paddingHorizontal: horizontalScale(16),
-    marginBottom: verticalScale(12),
+    marginBottom: verticalScale(16),
   },
   infoRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     paddingHorizontal: horizontalScale(16),
-    paddingVertical: verticalScale(12),
+    paddingVertical: verticalScale(14),
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -446,7 +509,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: horizontalScale(16),
-    paddingVertical: verticalScale(12),
+    paddingVertical: verticalScale(14),
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -474,7 +537,6 @@ const styles = StyleSheet.create({
   memberStatus: {
     fontSize: moderateScale(12),
     ...fonts.regular,
-    color: colors.success,
     marginTop: verticalScale(2),
   },
   roleBadge: {
