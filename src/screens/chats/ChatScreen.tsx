@@ -17,6 +17,7 @@ import {
 import {useNavigation, useRoute} from '@react-navigation/native';
 import {useDispatch, useSelector} from 'react-redux';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {useQueryClient} from '@tanstack/react-query';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {
   horizontalScale,
@@ -26,20 +27,23 @@ import {
 import {colors} from '../../Helper/colors';
 import {fonts} from '../../Helper/fontsUtils';
 import {MessageService, ChatService} from '../../services';
-import {setMessages, updateMessage, setCurrentChat} from '../../Redux/chatSlice';
+import {updateMessage, setCurrentChat} from '../../Redux/chatSlice';
 import {addSnackbar, SnackbarType} from '../../Redux/snackbarSlice';
 import {Message, User} from '../../types';
 import {getUser} from '../../firebase/database';
 import Avatar from '../../Components/Common/Avatar';
 import MessageBubble from '../../Components/Common/MessageBubble';
 import SystemMessage from '../../Components/Common/SystemMessage';
+import TypingIndicator from '../../Components/Common/TypingIndicator';
+import {useMessages, useSendMessage} from '../../hooks/useMessages';
 
 const ChatScreen: React.FC = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const dispatch = useDispatch();
+  const queryClient = useQueryClient();
   const {chatId} = route.params as {chatId: string};
-  const {messages, currentChat} = useSelector((state: any) => state.chat);
+  const {currentChat} = useSelector((state: any) => state.chat);
   const {user} = useSelector((state: any) => state.auth);
   const insets = useSafeAreaInsets();
   const [messageText, setMessageText] = useState('');
@@ -50,11 +54,37 @@ const ChatScreen: React.FC = () => {
   const [showMessageMenu, setShowMessageMenu] = useState(false);
   const [userCache, setUserCache] = useState<{[uid: string]: User}>({});
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [hasLoadedInitially, setHasLoadedInitially] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchingUsersRef = useRef<Set<string>>(new Set());
 
-  const chatMessages = messages[chatId] || [];
+  // TanStack Query hooks for messages
+  const {
+    data: messagesData,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useMessages(chatId);
+  
+  const sendMessageMutation = useSendMessage(chatId);
+  
+  // Deduplicate and sort messages to prevent duplicate keys and ensure correct order
+  const chatMessages = React.useMemo(() => {
+    const messages = messagesData?.messages || [];
+    const seenIds = new Set<string>();
+    const uniqueMessages = messages.filter((msg) => {
+      if (seenIds.has(msg.messageId)) {
+        return false;
+      }
+      seenIds.add(msg.messageId);
+      return true;
+    });
+    
+    // Sort by timestamp (oldest first, newest last) to ensure newest is at bottom
+    return uniqueMessages.sort((a, b) => a.timestamp - b.timestamp);
+  }, [messagesData?.messages]);
 
   const getParticipantsArray = (participants: any): string[] => {
     if (!participants) return [];
@@ -117,6 +147,17 @@ const ChatScreen: React.FC = () => {
     };
   }, []);
 
+  // Track when we've finished initial load
+  useEffect(() => {
+    if (!isLoading && chatMessages.length > 0 && !hasLoadedInitially) {
+      setHasLoadedInitially(true);
+      // Scroll to bottom after initial load
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({animated: false});
+      }, 100);
+    }
+  }, [isLoading, chatMessages.length, hasLoadedInitially]);
+
   useEffect(() => {
     if (currentChat?.type !== 'group' || !chatMessages.length || !user) return;
 
@@ -173,27 +214,82 @@ const ChatScreen: React.FC = () => {
     };
 
     fetchUserInfo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatMessages.length, currentChat?.type, user?.uid]);
 
+  // Watch for new messages from Firebase and update query cache
   useEffect(() => {
-    const loadMessages = async () => {
-      try {
-        const msgs = await MessageService.getMessages(chatId);
-        dispatch(setMessages({chatId, messages: msgs}));
-      } catch {
-      }
-    };
-
-    loadMessages();
+    if (!chatId || !user) return;
+    
     const unsubscribe = MessageService.watchMessages(
       chatId,
       (msgs: Message[]) => {
-        dispatch(setMessages({chatId, messages: msgs}));
+        // Update the query cache with new messages from Firebase
+        queryClient.setQueryData(['messages', chatId], (old: any) => {
+          if (!old) return old;
+          
+          // Get all existing messages from pages (more reliable than old.messages)
+          const existingMessagesFromPages = old.pages 
+            ? old.pages.flatMap((page: any) => page.messages || [])
+            : [];
+          
+          // Also check old.messages if it exists (from select function)
+          const existingMessages = old.messages || existingMessagesFromPages;
+          
+          // Create a Set of all existing message IDs for fast lookup
+          const existingMessageIds = new Set(
+            existingMessages.map((msg: Message) => msg.messageId)
+          );
+          
+          // Filter out messages that already exist
+          const newMessages = msgs.filter(
+            (msg) => !existingMessageIds.has(msg.messageId)
+          );
+          
+          if (newMessages.length === 0) return old;
+          
+          // Update pages structure - add new messages to the last page (newest messages)
+          // Pages are ordered [oldest page, ..., newest page], so add to last page
+          const updatedPages = old.pages && old.pages.length > 0
+            ? old.pages.map((page: any, index: number) => {
+                const lastPageIndex = old.pages.length - 1;
+                if (index === lastPageIndex) {
+                  // Deduplicate messages in the last page before adding new ones
+                  const existingPageMessages = page.messages || [];
+                  const pageMessageIds = new Set(existingPageMessages.map((m: Message) => m.messageId));
+                  const uniqueNewMessages = newMessages.filter(msg => !pageMessageIds.has(msg.messageId));
+                  // Add new messages to the end (newest at bottom)
+                  return { ...page, messages: [...existingPageMessages, ...uniqueNewMessages] };
+                }
+                return page;
+              })
+            : [{ messages: newMessages, nextPage: undefined, hasMore: false }];
+          
+          // Update messages array - combine existing with new messages, then sort
+          const allMessages = [...existingMessages, ...newMessages];
+          const seenIds = new Set<string>();
+          const uniqueAllMessages = allMessages.filter((msg) => {
+            if (seenIds.has(msg.messageId)) {
+              return false;
+            }
+            seenIds.add(msg.messageId);
+            return true;
+          });
+          
+          // Sort by timestamp (oldest first, newest last)
+          const sortedMessages = uniqueAllMessages.sort((a, b) => a.timestamp - b.timestamp);
+          
+          return {
+            ...old,
+            pages: updatedPages,
+            messages: sortedMessages,
+          };
+        });
       },
     );
 
     return () => unsubscribe();
-  }, [chatId, dispatch]);
+  }, [chatId, queryClient, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -253,27 +349,37 @@ const ChatScreen: React.FC = () => {
         clearTimeout(typingTimeoutRef.current);
       }
 
-      if (replyToMessage) {
-        await MessageService.sendReplyMessage(
-          chatId,
-          user.uid,
-          messageText.trim(),
-          replyToMessage.messageId,
-        );
-        setReplyToMessage(null);
-      } else {
-        await MessageService.sendTextMessage(
-          chatId,
-          user.uid,
-          messageText.trim(),
-        );
-      }
+      const tempId = `temp-${Date.now()}`;
+      
+      // Use optimistic update via TanStack Query
+      sendMessageMutation.mutate({
+        chatId,
+        senderId: user.uid,
+        text: messageText.trim(),
+        tempId,
+        replyTo: replyToMessage?.messageId,
+      });
 
       setMessageText('');
+      setReplyToMessage(null);
+      
+      // Scroll to bottom after sending
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({animated: true});
       }, 100);
     } catch {
+      dispatch(
+        addSnackbar({
+          message: 'Failed to send message',
+          type: SnackbarType.ERROR,
+        }),
+      );
+    }
+  };
+
+  const handleLoadMore = () => {
+    if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
     }
   };
 
@@ -466,16 +572,7 @@ const ChatScreen: React.FC = () => {
     const typingUserIds = Object.keys(typingUsers);
     if (typingUserIds.length === 0) return null;
 
-    return (
-      <View style={styles.typingContainer}>
-        <ActivityIndicator size="small" color={colors.textSecondary} />
-        <Text style={styles.typingText}>
-          {typingUserIds.length === 1
-            ? `${otherUser?.displayName || 'Someone'} is typing...`
-            : 'Multiple people are typing...'}
-        </Text>
-      </View>
-    );
+    return <TypingIndicator backgroundColor={colors.gray200} />;
   };
 
   const getDisplayName = () => {
@@ -534,21 +631,45 @@ const ChatScreen: React.FC = () => {
       </View>
 
       <View style={styles.messagesContainer}>
-        <FlatList
-          ref={flatListRef}
-          data={chatMessages}
-          renderItem={renderMessage}
-          keyExtractor={item => item.messageId}
-          contentContainerStyle={styles.messagesList}
-          inverted={false}
-          onContentSizeChange={() => {
-            flatListRef.current?.scrollToEnd({animated: true});
-          }}
-          ListFooterComponent={renderTypingIndicator}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-        />
+        {isLoading && chatMessages.length === 0 ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={chatMessages}
+            renderItem={renderMessage}
+            keyExtractor={item => item.messageId}
+            contentContainerStyle={styles.messagesList}
+            inverted={false}
+            onContentSizeChange={() => {
+              if (!hasLoadedInitially && chatMessages.length > 0) {
+                // Scroll to bottom (newest message) after initial load
+                setTimeout(() => {
+                  flatListRef.current?.scrollToEnd({animated: false});
+                }, 100);
+              }
+            }}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={
+              <>
+                {renderTypingIndicator()}
+                {isFetchingNextPage && (
+                  <ActivityIndicator
+                    size="small"
+                    color={colors.primary}
+                    style={styles.loadMoreIndicator}
+                  />
+                )}
+              </>
+            }
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+          />
+        )}
       </View>
 
       {replyToMessage && (
@@ -601,8 +722,13 @@ const ChatScreen: React.FC = () => {
           {messageText.trim() ? (
             <TouchableOpacity
               style={styles.sendButton}
-              onPress={handleSendMessage}>
-              <Icon name="send" size={24} color={colors.primary} />
+              onPress={handleSendMessage}
+              disabled={sendMessageMutation.isPending}>
+              {sendMessageMutation.isPending ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Icon name="send" size={24} color={colors.primary} />
+              )}
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={styles.micButton}>
@@ -715,6 +841,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: horizontalScale(16),
     paddingTop: verticalScale(12),
     paddingBottom: verticalScale(8),
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadMoreIndicator: {
+    padding: verticalScale(10),
   },
   typingContainer: {
     flexDirection: 'row',
